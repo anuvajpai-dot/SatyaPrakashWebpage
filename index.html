@@ -190,6 +190,8 @@ nav.menu a:hover{background:rgba(255,255,255,.07);color:var(--tx)}
 .lph{width:100%;height:100%;display:grid;place-items:center;font-family:var(--mono);
   font-size:15px;color:var(--tx-3);background:linear-gradient(135deg,var(--tile-a),var(--tile-b))}
 .ltx b{display:block;font-size:13.5px;font-weight:500;line-height:1.5}
+.ltx b em{font-style:normal;font-family:var(--mono);font-size:9.5px;letter-spacing:.08em;
+  background:var(--amber);color:var(--on-amber);padding:1px 5px;border-radius:4px;vertical-align:2px}
 .ltx span{display:block;font-size:12px;color:var(--tx-3);line-height:1.55;margin-top:2px}
 .lesson.active .ltx b{color:var(--amber-2)}
 
@@ -496,7 +498,7 @@ const YT_API_KEY = ((window.YT_API_KEY || "AIzaSyCGvBsetZ2dWboVEuHOl9JJ7j7yfjlEe
 const CHANNEL_ID = "UClUPuBAwTyRvGjNk552VcoA";
 const PLAYLIST   = "UUlUPuBAwTyRvGjNk552VcoA";
 
-const COURSE = [
+let COURSE = [
 {
 "n": 1,
 "t": "पुस्तकालय विज्ञान की नींव",
@@ -1257,7 +1259,7 @@ async function viaAPI(){
     const r=await fetch(u); if(!r.ok) throw new Error('api '+r.status);
     const j=await r.json();
     j.items.forEach(it=>{ const s=it.snippet;
-      if(s.resourceId&&s.resourceId.videoId) out.push({id:s.resourceId.videoId,t:s.title}); });
+      if(s.resourceId&&s.resourceId.videoId) out.push({id:s.resourceId.videoId,t:s.title,date:s.publishedAt}); });
     token=j.nextPageToken||'';
   } while(token && out.length<400);
   return out;
@@ -1310,10 +1312,13 @@ async function fetchStatus(ids){
   for (let i = 0; i < ids.length; i += 50){
     const part = ids.slice(i, i + 50).join(',');
     try{
-      const r = await timed(fetch(`https://www.googleapis.com/youtube/v3/videos?part=status&id=${part}&key=${YT_API_KEY}`), 10000);
+      const r = await timed(fetch(`https://www.googleapis.com/youtube/v3/videos?part=status,contentDetails&id=${part}&key=${YT_API_KEY}`), 10000);
       if (!r.ok) break;
       const j = await r.json();
-      (j.items||[]).forEach(it => { out[it.id] = it.status && it.status.embeddable !== false; });
+      (j.items||[]).forEach(it => {
+        out[it.id] = it.status && it.status.embeddable !== false;
+        if (it.contentDetails) DUR[it.id] = isoDur(it.contentDetails.duration);
+      });
     }catch(e){ break; }
   }
   return out;
@@ -1330,8 +1335,35 @@ async function fetchFeed(){
 }
 
 /* ---------- सूची बनाना ---------- */
+/* नए वीडियो को शीर्षक देखकर सही अध्याय में रखने के संकेत-शब्द */
+const KEYS = [
+  [8, ["mock","interview","साक्षात्कार","इंटरव्यू","net","jrf","परीक्षा","exam","भर्ती","syllabus","पाठ्यक्रम प्रारूप","emrs","kvs","tgt","pgt","mppsc","psc","internship","tier"]],
+  [7, ["egranthalaya","ई-ग्रंथालय","koha","dspace","opac","डिजिटल","digital","स्वचालन","automation","ict","नेटवर्क","network","inflibnet","delnet","ndli","onos","niscpr","niscair","ifla","database","डेटाबेस","dbms","boolean","computer","कंप्यूटर","सॉफ्टवेयर","इंटरनेट"]],
+  [3, ["सूचीकरण","सूची","catalog","aacr","ccc","marc","प्रविष्टि","anukraman","अनुक्रमणीकरण","indexing","vocabulary","शब्दावली","शीर्षक सूची"]],
+  [2, ["वर्गीकरण","classification","ddc","udc","colon","कॉलन","dewey","संकेतन","notation","pmest","अंकन","दशासम्बन्ध","phase relation","श्रृंखला"]],
+  [5, ["शोध","research","परिकल्पना","hypothesis","प्रतिचयन","sampling","methodology","प्रविधि","thesis","plagiarism","साहित्यिक चोरी","ethics","नैतिकता","bibliometric","ग्रंथमिति","survey","सर्वेक्षण","synopsis","प्रस्ताव"]],
+  [6, ["प्रबंधन","management","बजट","budget","अर्जन","acquisition","परिचालन","circulation","कर्मचारी","staff","tqm","गुणवत्ता","hrm","मानव संसाधन","book selection","पुस्तक चयन"]],
+  [4, ["स्रोत","source","संदर्भ","reference","सेवा","service","cas","sdi","ग्रंथसूची","bibliograph","विश्वकोश","शब्दकोश","उपयोगकर्ता","user education","user studies"]],
+  [1, ["पंचसूत्र","five law","रंगनाथन","ranganathan","परिचय","introduction","इतिहास","history","प्रकार","types of librar","अधिनियम","अवधारणा","universe of knowledge","ज्ञान जगत"]]
+];
+function chapterOf(title){
+  const s = norm(title);
+  for (const [n, words] of KEYS) if (words.some(w => s.includes(w))) return n;
+  return 0;
+}
+/* PT1H2M3S → 1:02:03 */
+function isoDur(d){
+  const m = /PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/.exec(d || '');
+  if (!m) return '';
+  const h = +(m[1]||0), mi = +(m[2]||0), s = +(m[3]||0);
+  const p = n => String(n).padStart(2,'0');
+  return h ? `${h}:${p(mi)}:${p(s)}` : `${mi}:${p(s)}`;
+}
+
 const scroll = $('#sideScroll');
 const EMBED = {};
+const DUR = {};
+const BASE = JSON.parse(JSON.stringify(COURSE));
 let statusEl = null;
 
 function setStatus(msg){
@@ -1349,16 +1381,54 @@ function setStatus(msg){
 }
 
 function build(feed){
+  /* हर बार साफ़ सूची से शुरू कीजिए, ताकि दोबारा चलने पर दोहराव न हो */
+  COURSE = JSON.parse(JSON.stringify(BASE));
+
   const pool = feed.map(f => ({...f, n: norm(f.t), used:false}));
   let matched = 0;
 
   COURSE.forEach(c => c.v.forEach(v => {
     const q = norm(v.q);
     const hit = pool.find(p => !p.used && p.n.includes(q));
-    if (hit){ hit.used = true; v.id = hit.id; matched++; }
+    if (hit){
+      hit.used = true; v.id = hit.id; matched++;
+      if (DUR[hit.id]) v.dur = DUR[hit.id];
+    }
     v.blocked = v.id && EMBED[v.id] === false;
   }));
+
+  /* ---- सूची में जो वीडियो बचे, वे नए अपलोड हैं — अपने आप जुड़ जाएँगे ---- */
+  const fresh = Date.now() - 60*24*3600*1000;
+  const extras = pool.filter(p => !p.used);
+  if (extras.length){
+    let misc = null;
+    extras.forEach(p => {
+      const n = chapterOf(p.t);
+      let c = COURSE.find(x => x.n === n);
+      if (!c){
+        if (!misc){
+          misc = {n:0, t:'नए व्याख्यान', e:'Recently added', v:[]};
+          COURSE.push(misc);
+        }
+        c = misc;
+      }
+      c.v.unshift({
+        t: p.t, d: '', q: p.t, id: p.id,
+        dur: DUR[p.id] || '',
+        blocked: EMBED[p.id] === false,
+        isNew: p.date ? (new Date(p.date).getTime() > fresh) : true,
+        auto: true
+      });
+      matched++;
+    });
+  }
+
+  const TOTAL_NOW = COURSE.reduce((a,c) => a + c.v.length, 0);
   let blocked = COURSE.reduce((a,c) => a + c.v.filter(x => x.blocked).length, 0);
+  $('#topicCount').textContent  = TOTAL_NOW;
+  $('#topicCount2').textContent = TOTAL_NOW;
+  $('#chapCount').textContent   = COURSE.length;
+  $('#chapCount2').textContent  = COURSE.length;
 
   scroll.innerHTML = '';
   statusEl = null;
@@ -1369,8 +1439,8 @@ function build(feed){
     box.className = 'ch' + (ci===0 ? ' open' : '');
     box.innerHTML = `
       <button class="ch-h" aria-expanded="${ci===0}">
-        <span class="ch-n">${String(c.n).padStart(2,'0')}</span>
-        <span class="ch-t">${c.t}<i>${c.v.length} व्याख्यान · ${c.e}</i></span>
+        <span class="ch-n">${c.n ? String(c.n).padStart(2,"0") : "★"}</span>
+        <span class="ch-t">${c.t}<i>${c.v.length} व्याख्यान${c.e ? " · " + c.e : ""}</i></span>
         <span class="ch-v">▾</span>
       </button><div class="ch-b"></div>`;
     const body = box.querySelector('.ch-b');
@@ -1383,7 +1453,7 @@ function build(feed){
         : `<span class="lph">${String(c.n).padStart(2,'0')}</span>`;
       b.innerHTML = `
         <span class="lthumb">${thumb}<i>${v.blocked ? '↗' : '▶'}</i><em>${v.dur}</em></span>
-        <span class="ltx"><b>${v.t}</b><span>${v.blocked ? 'YouTube पर देखिए' : v.d}</span></span>`;
+        <span class="ltx"><b>${v.isNew ? '<em class="new">नया</em> ' : ''}${v.t}</b><span>${v.blocked ? 'YouTube पर देखिए' : v.d}</span></span>`;
       b.addEventListener('click', () => {
         if (v.blocked){
           window.open('https://www.youtube.com/watch?v=' + v.id, '_blank', 'noopener');
