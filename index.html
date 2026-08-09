@@ -340,7 +340,7 @@ footer a{color:var(--tx-2)}
       <p class="pdesc">पंद्रह वर्ष से अधिक के अध्यापन अनुभव के साथ BLIS, MLIS एवं शोध स्तर के विद्यार्थियों का मार्गदर्शन। वर्गीकरण, सूचीकरण, शोध प्रविधि एवं पुस्तकालय प्रबंधन का सम्पूर्ण पाठ्यक्रम — सरल हिंदी में, तकनीकी शब्दावली अंग्रेज़ी में, पूर्णतः निःशुल्क।</p>
       <div class="chips">
         <span class="hi"><b id="chapCount">8</b> अध्याय</span>
-        <span><b id="topicCount">105</b> व्याख्यान</span>
+        <span><b id="topicCount">104</b> व्याख्यान</span>
         <span>60+ घंटे</span>
         <span class="free">निःशुल्क</span>
         <span>BLIS · MLIS · UGC NET</span>
@@ -527,12 +527,6 @@ let COURSE = [
 "d": "Modes of formation of subject",
 "dur": "41:40",
 "q": "Methods of creating the world of knowledge"
-},
-{
-"t": "Library and Information Science",
-"d": "विभागीय कार्यक्रम की झलक",
-"dur": "0:30",
-"q": "Library and Information Science"
 }
 ]
 },
@@ -1355,6 +1349,7 @@ function chapterOf(title){
 /* Shorts एवं अवांछित वीडियो बाहर रखने के नियम */
 const MIN_SECONDS = 181;                 /* 3 मिनट से छोटा = Short, न जोड़ें */
 const SKIP = (window.YT_SKIP || []).map(String);
+function looksShort(title){ return /#short|#shorts|\bshorts?\b/i.test(title || ''); }
 
 /* PT1H2M3S → सेकंड */
 function isoSecs(d){
@@ -1419,6 +1414,7 @@ function build(feed){
     const s = SECS[p.id];
     if (s === undefined) return false;                  /* अवधि पता नहीं — सुरक्षित रहिए */
     if (s < MIN_SECONDS){ skippedShort++; return false; } /* Shorts */
+    if (looksShort(p.t)){ skippedShort++; return false; } /* शीर्षक में #shorts */
     return true;
   });
   if (extras.length){
@@ -1443,6 +1439,17 @@ function build(feed){
       matched++;
     });
   }
+
+  /* अंतिम जाँच — किसी भी अध्याय में 3 मिनट से छोटा वीडियो न बचे */
+  COURSE.forEach(c => {
+    c.v = c.v.filter(v => {
+      if (v.id && SKIP.includes(v.id)) return false;
+      if (v.id && SECS[v.id] !== undefined && SECS[v.id] < MIN_SECONDS) return false;
+      if (looksShort(v.t)) return false;
+      return true;
+    });
+  });
+  COURSE = COURSE.filter(c => c.v.length > 0);
 
   const TOTAL_NOW = COURSE.reduce((a,c) => a + c.v.length, 0);
   let blocked = COURSE.reduce((a,c) => a + c.v.filter(x => x.blocked).length, 0);
