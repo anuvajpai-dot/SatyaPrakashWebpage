@@ -1304,6 +1304,21 @@ async function viaScrape(){
   return out;
 }
 
+async function fetchStatus(ids){
+  const out = {};
+  if (!YT_API_KEY) return out;
+  for (let i = 0; i < ids.length; i += 50){
+    const part = ids.slice(i, i + 50).join(',');
+    try{
+      const r = await timed(fetch(`https://www.googleapis.com/youtube/v3/videos?part=status&id=${part}&key=${YT_API_KEY}`), 10000);
+      if (!r.ok) break;
+      const j = await r.json();
+      (j.items||[]).forEach(it => { out[it.id] = it.status && it.status.embeddable !== false; });
+    }catch(e){ break; }
+  }
+  return out;
+}
+
 async function fetchFeed(){
   if (YT_API_KEY){
     try{ const a = await timed(viaAPI(), 12000); if(a.length) return a; }
@@ -1316,6 +1331,7 @@ async function fetchFeed(){
 
 /* ---------- सूची बनाना ---------- */
 const scroll = $('#sideScroll');
+const EMBED = {};
 let statusEl = null;
 
 function setStatus(msg){
@@ -1340,7 +1356,9 @@ function build(feed){
     const q = norm(v.q);
     const hit = pool.find(p => !p.used && p.n.includes(q));
     if (hit){ hit.used = true; v.id = hit.id; matched++; }
+    v.blocked = v.id && EMBED[v.id] === false;
   }));
+  let blocked = COURSE.reduce((a,c) => a + c.v.filter(x => x.blocked).length, 0);
 
   scroll.innerHTML = '';
   statusEl = null;
@@ -1364,9 +1382,13 @@ function build(feed){
         ? `<img loading="lazy" src="https://i.ytimg.com/vi/${v.id}/mqdefault.jpg" alt="">`
         : `<span class="lph">${String(c.n).padStart(2,'0')}</span>`;
       b.innerHTML = `
-        <span class="lthumb">${thumb}<i>▶</i><em>${v.dur}</em></span>
-        <span class="ltx"><b>${v.t}</b><span>${v.d}</span></span>`;
+        <span class="lthumb">${thumb}<i>${v.blocked ? '↗' : '▶'}</i><em>${v.dur}</em></span>
+        <span class="ltx"><b>${v.t}</b><span>${v.blocked ? 'YouTube पर देखिए' : v.d}</span></span>`;
       b.addEventListener('click', () => {
+        if (v.blocked){
+          window.open('https://www.youtube.com/watch?v=' + v.id, '_blank', 'noopener');
+          return;
+        }
         if (v.id){
           document.querySelectorAll('.lesson.active').forEach(x=>x.classList.remove('active'));
           b.classList.add('active');
@@ -1378,7 +1400,7 @@ function build(feed){
         }
       });
       body.appendChild(b);
-      if (!firstPlayable && v.id) firstPlayable = {b, v, c};
+      if (!firstPlayable && v.id && !v.blocked) firstPlayable = {b, v, c};
     });
 
     const hh = box.querySelector('.ch-h');
@@ -1398,6 +1420,8 @@ function build(feed){
   }
   if (matched === 0){
     setStatus(null);
+  } else if (blocked > 0){
+    setStatus(`${matched - blocked} व्याख्यान इसी पृष्ठ पर चल रहे हैं। ${blocked} पर YouTube में embedding बंद है — उन पर क्लिक करने से वे YouTube पर खुलेंगे।`);
   } else if (matched < TOTAL){
     setStatus(`${matched} व्याख्यान इसी पृष्ठ पर चल रहे हैं। शेष ${TOTAL - matched} अभी सूची से नहीं जुड़ पाए।`);
   }
@@ -1409,8 +1433,13 @@ build([]);
 /* 2) पृष्ठभूमि में चैनल से असली ID लाकर thumbnail एवं inline playback जोड़िए */
 setStatus('चैनल से व्याख्यान जोड़े जा रहे हैं…');
 fetchFeed()
-  .then(feed => { if (feed && feed.length) build(feed); else setStatus(null); })
-  .catch(()  => setStatus(null));
+  .then(async feed => {
+    if (!feed || !feed.length) { setStatus(null); return; }
+    const st = await fetchStatus(feed.map(f => f.id));
+    Object.keys(st).forEach(k => { EMBED[k] = st[k]; });
+    build(feed);
+  })
+  .catch(() => setStatus(null));
 
 /* सक्रिय मेनू */
 const links = [...document.querySelectorAll('nav.menu a')];
