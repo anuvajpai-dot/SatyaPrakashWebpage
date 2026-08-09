@@ -1317,7 +1317,8 @@ async function fetchStatus(ids){
       const j = await r.json();
       (j.items||[]).forEach(it => {
         out[it.id] = it.status && it.status.embeddable !== false;
-        if (it.contentDetails) DUR[it.id] = isoDur(it.contentDetails.duration);
+        if (it.contentDetails){ DUR[it.id] = isoDur(it.contentDetails.duration);
+          SECS[it.id] = isoSecs(it.contentDetails.duration); }
       });
     }catch(e){ break; }
   }
@@ -1351,6 +1352,17 @@ function chapterOf(title){
   for (const [n, words] of KEYS) if (words.some(w => s.includes(w))) return n;
   return 0;
 }
+/* Shorts एवं अवांछित वीडियो बाहर रखने के नियम */
+const MIN_SECONDS = 181;                 /* 3 मिनट से छोटा = Short, न जोड़ें */
+const SKIP = (window.YT_SKIP || []).map(String);
+
+/* PT1H2M3S → सेकंड */
+function isoSecs(d){
+  const m = /PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/.exec(d || '');
+  if (!m) return 0;
+  return (+(m[1]||0))*3600 + (+(m[2]||0))*60 + (+(m[3]||0));
+}
+
 /* PT1H2M3S → 1:02:03 */
 function isoDur(d){
   const m = /PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/.exec(d || '');
@@ -1363,6 +1375,7 @@ function isoDur(d){
 const scroll = $('#sideScroll');
 const EMBED = {};
 const DUR = {};
+const SECS = {};
 const BASE = JSON.parse(JSON.stringify(COURSE));
 let statusEl = null;
 
@@ -1390,7 +1403,7 @@ function build(feed){
   COURSE.forEach(c => c.v.forEach(v => {
     const q = norm(v.q);
     const hit = pool.find(p => !p.used && p.n.includes(q));
-    if (hit){
+    if (hit && !SKIP.includes(hit.id)){
       hit.used = true; v.id = hit.id; matched++;
       if (DUR[hit.id]) v.dur = DUR[hit.id];
     }
@@ -1399,7 +1412,15 @@ function build(feed){
 
   /* ---- सूची में जो वीडियो बचे, वे नए अपलोड हैं — अपने आप जुड़ जाएँगे ---- */
   const fresh = Date.now() - 60*24*3600*1000;
-  const extras = pool.filter(p => !p.used);
+  let skippedShort = 0;
+  const extras = pool.filter(p => {
+    if (p.used) return false;
+    if (SKIP.includes(p.id)) return false;              /* स्वयं छोड़े गए वीडियो */
+    const s = SECS[p.id];
+    if (s === undefined) return false;                  /* अवधि पता नहीं — सुरक्षित रहिए */
+    if (s < MIN_SECONDS){ skippedShort++; return false; } /* Shorts */
+    return true;
+  });
   if (extras.length){
     let misc = null;
     extras.forEach(p => {
